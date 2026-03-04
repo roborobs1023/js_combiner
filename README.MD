@@ -13,7 +13,7 @@ A lightweight, zero-dependency Go utility to recursively walk a directory, conca
 Ensure you have Go installed and your `GOBIN` is in your system path.
 
 ```bash
-go install [github.com/roborobs1023/js_combiner@latest](https://github.com/roborobs1023/js_combiner@latest)
+go install github.com/roborobs1023/js_combiner@latest
 ```
 ## Usage
 
