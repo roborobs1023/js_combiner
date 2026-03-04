@@ -9,70 +9,81 @@ import (
 	"strings"
 )
 
-// Simple minifier using Regex
 func minify(js string) string {
-	// 1. Remove multi-line comments /* ... */
 	reMulti := regexp.MustCompile(`(?s)/\*.*?\*/`)
 	js = reMulti.ReplaceAllString(js, "")
-
-	// 2. Remove single-line comments // ...
-	reSingle := regexp.MustCompile(`(?m)//.*$`)
+	reSingle := regexp.MustCompile(`(?m)^[ \t]*//.*$`)
 	js = reSingle.ReplaceAllString(js, "")
-
-	// 3. Remove unnecessary whitespace (tabs, newlines, extra spaces)
-	// This is a "safe" minify: it replaces sequences of whitespace with a single space
 	reSpace := regexp.MustCompile(`\s+`)
 	js = reSpace.ReplaceAllString(js, " ")
-
 	return strings.TrimSpace(js)
 }
 
 func main() {
-	// Define Flags
-	srcPtr := flag.String("src", "./src/js", "Directory containing source JS files")
-	outPtr := flag.String("out", "./dist/bundle.js", "Path for the output bundled file")
-	minifyPtr := flag.Bool("minify", false, "Enable basic minification")
+	srcPtr := flag.String("src", "./src/js", "Source directory")
+	outPtr := flag.String("out", "./dist/bundle.js", "Output file path")
+	doMinify := flag.Bool("minify", false, "Minify the output")
 
 	flag.Parse()
 
+	// Clean paths to avoid trailing slash issues
 	srcDir := filepath.Clean(*srcPtr)
-	outputFile := filepath.Clean(*outPtr)
+	outFile := filepath.Clean(*outPtr)
 
-	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
-		fmt.Printf("Error creating directory: %v\n", err)
-		return
+	fmt.Printf("🔍 Scanning: %s\n", srcDir)
+
+	// Verify source directory exists
+	info, err := os.Stat(srcDir)
+	if os.IsNotExist(err) {
+		fmt.Printf("❌ Error: Source directory '%s' not found.\n", srcDir)
+		os.Exit(1)
+	}
+	if !info.IsDir() {
+		fmt.Printf("❌ Error: '%s' is a file, not a directory.\n", srcDir)
+		os.Exit(1)
 	}
 
-	out, err := os.Create(outputFile)
+	// Prepare output
+	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
+		fmt.Printf("❌ Error creating output dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	out, err := os.Create(outFile)
 	if err != nil {
-		fmt.Printf("Error creating output file: %v\n", err)
-		return
+		fmt.Printf("❌ Error creating file: %v\n", err)
+		os.Exit(1)
 	}
 	defer out.Close()
 
-	fmt.Printf("🚀 Bundling: %s -> %s (Minify: %v)\n", srcDir, outputFile, *minifyPtr)
+	fileCount := 0
 
-	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	// Using WalkDir for O(n) efficiency with DirEntry
+	err = filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".js") && path != outputFile {
+		// Case-insensitive extension check
+		isJS := strings.ToLower(filepath.Ext(path)) == ".js"
+
+		if !d.IsDir() && isJS && path != outFile {
+			fmt.Printf("  -> Adding: %s\n", path)
+			fileCount++
+
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to read %s: %w", path, err)
 			}
 
-			var finalContent string
-			if *minifyPtr {
-				finalContent = minify(string(content))
+			data := string(content)
+			if *doMinify {
+				data = minify(data)
 			} else {
-				// Add header for easier debugging when not minified
-				finalContent = fmt.Sprintf("\n/* Source: %s */\n%s\n", path, string(content))
+				data = fmt.Sprintf("\n// Source: %s\n%s\n", path, data)
 			}
 
-			if _, err := out.WriteString(finalContent); err != nil {
+			if _, err := out.WriteString(data); err != nil {
 				return err
 			}
 		}
@@ -80,8 +91,10 @@ func main() {
 	})
 
 	if err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
+		fmt.Printf("❌ Walk failed: %v\n", err)
+	} else if fileCount == 0 {
+		fmt.Println("⚠️  Warning: No .js files found in the source directory.")
 	} else {
-		fmt.Println("✅ Bundle complete!")
+		fmt.Printf("✅ Success! Bundled %d files into %s\n", fileCount, outFile)
 	}
 }
